@@ -129,7 +129,7 @@ cosboard 内部存在**多套 SKU 编码体系**，导入 DuckDB 后直接 `JOIN
 
 **处理方法**：
 - 所有数据源必须在 ETL 层统一为同一套 SKU 编码后再导入 DuckDB
-- 不允许在 DuckDB 内做编码映射桥接（如 `ods_cdm_skubom`）
+- 不允许在 DuckDB 内做编码映射桥接——所有编码统一必须在 ETL 层（导入前）完成
 - 如果 `ods_sales` 的 SKU 格式和 `ods_skus` 不一致，说明 `ods_sales` 已内置归一化而 `ods_skus` 还是原生的——这是已知差异，应在 ETL 层统一，而非在各场景 SQL 中做映射补偿
 
 ## DuckDB 注意
