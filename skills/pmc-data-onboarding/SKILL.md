@@ -26,20 +26,72 @@ metadata:
 
 本 Skill 定义了 PMC Agent 引导新客户完成数据接入的**6 阶段对话流程**。Agent 加载后按序执行，每个阶段确认后才进入下一阶段。不要跳过步骤。
 
-## 接入前检查：管线是否就绪
+## 接入前检查：环境初始化
 
+PMC 系统的所有场景都需要 DuckDB 数据引擎。如果 DuckDB 未初始化，必须先完成初始化，否则后续所有阶段无法进行。
+
+### Step 1：检查 DuckDB 是否就绪
+
+```bash
+# 检查数据库文件是否存在且可读写
+duckdb $PMC_DB_PATH -c "SELECT COUNT(*) AS table_count FROM information_schema.tables WHERE table_schema='main';"
 ```
-# 检查 API 是否运行
-curl -s http://localhost:8765/ | python3 -m json.tool
 
-# 检查 DuckDB 是否可读
-duckdb ~/pmc-data/pmc_ods.duckdb -c "SELECT COUNT(*) FROM ods_skus;"
+| 返回结果 | 判定 | 处理 |
+|----------|------|------|
+| 文件不存在 或 无法连接 | DuckDB 未创建 | 进入 Step 2 初始化 |
+| 表数量 = 0 | 空库，只有文件没有表 | 进入 Step 2 |
+| 表数量 >= 9 | 已就绪 | 跳到「检查 API」 |
+| 表数量 1~8 | 部分就绪（异常状态） | DROP 所有表后进入 Step 2 |
+
+### Step 2：运行数据引擎自举脚本
+
+```bash
+cd ~/workspace/pmc-agent && python3 scripts/bootstrap_pipeline.py
+```
+
+`bootstrap_pipeline.py` 自动完成以下操作：
+1. 创建 `~/pmc-data/` 目录结构（static / snapshot / incremental）
+2. 创建 DuckDB 数据库文件
+3. 创建全部 ODS 表结构（9 张空壳表）
+4. 写入默认参数（P1-P14）到 `ods_params`
+5. 输出就绪检查报告
+
+**成功的输出示例**：
+```
+✓ 数据目录: ~/pmc-data
+✓ DuckDB 已创建: ~/pmc-data/pmc_ods.duckdb
+✓ ODS 表: 9/9 创建
+✓ DWD 视图: 2/2 创建
+✓ 默认参数: P1-P14 已写入
+```
+
+### Step 3：验证 DuckDB 就绪
+
+```bash
+duckdb $PMC_DB_PATH -c "
+SELECT table_name FROM information_schema.tables 
+WHERE table_schema='main' AND table_name LIKE 'ods_%' 
+ORDER BY table_name;
+"
+```
+
+期望输出至少包含 9 张 ODS 表。确认后进入下一步。
+
+### Step 4：检查 API 是否运行（如有管线依赖）
+
+如果客户需要通过 `pmc_template_api.py` 管线对接数据，检查 API 状态：
+
+```bash
+curl -s http://localhost:8765/ | python3 -m json.tool
 ```
 
 若 API 未启动：
 ```bash
 cd ~/workspace/pmc-agents && nohup python3 pmc_template_api.py &
 ```
+
+如果客户使用 CSV/Excel 导入模式（不依赖 API），跳过此步。
 
 ---
 
