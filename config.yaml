@@ -1,0 +1,17 @@
+model:
+  default: deepseek-v4-pro
+  provider: deepseek
+
+agent:
+  max_turns: 90
+
+terminal:
+  timeout: 300
+
+display:
+  tool_progress: new
+
+compression:
+  enabled: true
+  threshold: 0.50
+  target_ratio: 0.20

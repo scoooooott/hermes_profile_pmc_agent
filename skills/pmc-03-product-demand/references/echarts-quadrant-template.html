@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PMC 场景03 — 商品需求四象限</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e1e4e8; padding: 24px; }
+.header { text-align: center; margin-bottom: 24px; }
+.header h1 { font-size: 28px; color: #58a6ff; margin-bottom: 4px; }
+.header .sub { color: #8b949e; font-size: 14px; }
+.summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 16px; text-align: center; }
+.card .label { font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+.card .value { font-size: 28px; font-weight: 700; }
+.card .pct { font-size: 13px; color: #8b949e; margin-top: 2px; }
+.card.hh .value { color: #3fb950; }
+.card.hl .value { color: #f85149; }
+.card.lh .value { color: #d29922; }
+.card.ll .value { color: #8b949e; }
+.tier-table { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 16px; margin-bottom: 20px; overflow-x: auto; }
+.tier-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tier-table th { background: #21262d; padding: 8px 12px; text-align: center; border-bottom: 1px solid #30363d; color: #8b949e; font-weight: 600; }
+.tier-table td { padding: 8px 12px; text-align: center; border-bottom: 1px solid #21262d; }
+.tier-table tr:hover td { background: #1c2128; }
+.tier-table .tier-S { color: #f85149; font-weight: 700; }
+.tier-table .tier-A { color: #f0883e; font-weight: 700; }
+.tier-table .tier-B { color: #58a6ff; font-weight: 700; }
+.tier-table .tier-C { color: #8b949e; font-weight: 700; }
+.chart-row { display: grid; gap: 16px; margin-bottom: 20px; }
+.chart-box { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px; }
+.chart-box h3 { font-size: 14px; color: #8b949e; margin-bottom: 8px; text-align: center; }
+.chart-main { height: 520px; }
+.chart-sub { height: 380px; }
+.grid-2 { grid-template-columns: 1fr 1fr; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📊 场景03：商品需求四象限</h1>
+  <div class="sub">坐标系：Y = 货盘内中位数（日均销） | X = 货盘内中位数（库存天数） | 报告日期：{REPORT_DATE}</div>
+</div>
+
+<div class="summary-cards" id="summaryCards"></div>
+<div class="tier-table" id="tierTable"></div>
+
+<div class="chart-row">
+  <div class="chart-box">
+    <h3>全量散点图（X=库存天数·对数，Y=日均销量·对数，按货盘着色）</h3>
+    <div class="chart-main" id="chartMain"></div>
+  </div>
+</div>
+
+<div class="chart-row grid-2">
+  <div class="chart-box"><h3>S级 四象限</h3><div class="chart-sub" id="chartS"></div></div>
+  <div class="chart-box"><h3>A级 四象限</h3><div class="chart-sub" id="chartA"></div></div>
+  <div class="chart-box"><h3>B级 四象限</h3><div class="chart-sub" id="chartB"></div></div>
+  <div class="chart-box"><h3>C级 四象限</h3><div class="chart-sub" id="chartC"></div></div>
+</div>
+
+<script>
+// Paste the full DATA JSON object here from DuckDB query output
+const DATA = {DATA_JSON};
+
+// === DO NOT MODIFY BELOW ===
+const tierColors = { S: '#f85149', A: '#f0883e', B: '#58a6ff', C: '#8b949e' };
+const quadColors = { '高销高库存': '#3fb950', '高销低库存': '#f85149', '低销高库存': '#d29922', '低销低库存': '#8b949e' };
+const quadLabels = { '高销高库存':'关注补货节奏', '高销低库存':'⚠️ 断货风险', '低销高库存':'关注去化', '低销低库存':'观察/淘汰' };
+
+// Summary cards
+(function() {
+  const quads = DATA.quad_totals, total = DATA.total;
+  document.getElementById('summaryCards').innerHTML = Object.entries(quadLabels).map(([q, desc]) => {
+    const n = quads[q] || 0;
+    const cls = {'高销高库存':'hh','高销低库存':'hl','低销高库存':'lh','低销低库存':'ll'}[q];
+    return `<div class="card ${cls}"><div class="label">${q}</div><div class="value">${n}</div><div class="pct">${(n/total*100).toFixed(1)}% — ${desc}</div></div>`;
+  }).join('');
+})();
+
+// Tier table
+(function() {
+  const tiers = ['S','A','B','C'];
+  let html = `<table><thead><tr><th>货盘</th><th>SKU数</th><th>Y轴中位数<br>(日均销)</th><th>X轴中位数<br>(库存天数)</th><th>高销高库存</th><th>高销低库存</th><th>低销高库存</th><th>低销低库存</th></tr></thead><tbody>`;
+  for (const t of tiers) {
+    const ts = DATA.tier_stats[t]; if (!ts) continue;
+    const q = ts.quadrants;
+    html += `<tr><td class="tier-${t}">${t}</td><td>${ts.n}</td><td>${ts.median_depth}</td><td>${ts.ref_x}</td>${['高销高库存','高销低库存','低销高库存','低销低库存'].map(k => `<td>${q[k]||0} (${((q[k]||0)/ts.n*100).toFixed(0)}%)</td>`).join('')}</tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('tierTable').innerHTML = html;
+})();
+
+// Main chart (all tiers, log scales)
+(function() {
+  const ch = echarts.init(document.getElementById('chartMain'));
+  ch.setOption({
+    backgroundColor: '#161b22',
+    tooltip: { trigger:'item', backgroundColor:'#21262d', borderColor:'#30363d', textStyle:{color:'#e1e4e8',fontSize:12},
+      formatter: p => `<strong style="color:${tierColors[p.seriesName]}">[${p.seriesName}] ${p.data[2]}</strong><br/>${p.data[3]||''}<br/>日均销:${p.data[1]} 库存:${p.data[5]} 库存天:${p.data[0]}<br/>${p.data[4]}` },
+    legend: { data: Object.keys(tierColors), textStyle:{color:'#8b949e',fontSize:12}, top:8 },
+    grid: { left:70, right:16, top:50, bottom:50 },
+    xAxis: { type:'log', name:'库存天数 (天)', nameLocation:'center', nameGap:35, nameTextStyle:{color:'#8b949e',fontSize:13}, axisLabel:{color:'#8b949e',fontSize:11}, axisLine:{lineStyle:{color:'#30363d'}}, splitLine:{lineStyle:{color:'#21262d'}}, min:0.3 },
+    yAxis: { type:'log', name:'日均销量 (件/天)', nameLocation:'center', nameGap:55, nameTextStyle:{color:'#8b949e',fontSize:13}, axisLabel:{color:'#8b949e',fontSize:11}, axisLine:{lineStyle:{color:'#30363d'}}, splitLine:{lineStyle:{color:'#21262d'}} },
+    series: Object.entries(tierColors).map(([t,color]) => ({
+      name:t, type:'scatter',
+      data: DATA.points.filter(p=>p.tier===t).map(p=>[p.inventory_days, p.product_depth, p.sku_code, p.product_name, p.quadrant, p.inventory]),
+      symbolSize:5, itemStyle:{color,opacity:0.7},
+      emphasis:{itemStyle:{opacity:1,borderColor:'#fff',borderWidth:2},scale:2}
+    }))
+  });
+  window.addEventListener('resize', ()=>ch.resize());
+})();
+
+// Per-tier charts with reference lines
+['S','A','B','C'].forEach(tier => {
+  (function() {
+    const ch = echarts.init(document.getElementById('chart'+tier));
+    const ts = DATA.tier_stats[tier];
+    if (!ts) { ch.setOption({title:{text:'无数据',textStyle:{color:'#8b949e'}}}); return; }
+    const pts = DATA.points.filter(p=>p.tier===tier);
+    const mx = ts.ref_x, my = ts.median_depth;
+    const groups = {};
+    for (const q of Object.keys(quadLabels)) groups[q] = pts.filter(p=>p.quadrant===q).map(p=>[p.inventory_days, p.product_depth, p.sku_code, p.product_name, p.inventory]);
+
+    ch.setOption({
+      backgroundColor:'#161b22',
+      title:{text:`${tier}级·${pts.length} SKU·Y=${my}/X=${mx}`,textStyle:{color:'#8b949e',fontSize:12},left:'center',top:4},
+      tooltip:{trigger:'item',backgroundColor:'#21262d',borderColor:'#30363d',textStyle:{color:'#e1e4e8',fontSize:11},
+        formatter:p=>`${p.seriesName}<br/>${p.data[2]} ${p.data[3]||''}<br/>日均销:${p.data[1]} 库存:${p.data[4]} 库存天:${p.data[0]}`},
+      legend:{data:Object.keys(quadLabels),textStyle:{color:'#8b949e',fontSize:10},top:28},
+      grid:{left:64,right:12,top:72,bottom:40},
+      xAxis:{type:'log',name:'库存天数',nameTextStyle:{color:'#8b949e',fontSize:11},axisLabel:{color:'#8b949e',fontSize:10},axisLine:{lineStyle:{color:'#30363d'}},splitLine:{lineStyle:{color:'#21262d'}},min:0.3},
+      yAxis:{type:'log',name:'日均销',nameTextStyle:{color:'#8b949e',fontSize:11},axisLabel:{color:'#8b949e',fontSize:10},axisLine:{lineStyle:{color:'#30363d'}},splitLine:{lineStyle:{color:'#21262d'}}},
+      series: Object.entries(groups).map(([q,d])=>({name:q,type:'scatter',data:d,symbolSize:6,itemStyle:{color:quadColors[q],opacity:0.65},emphasis:{itemStyle:{opacity:1,borderColor:'#fff',borderWidth:2},scale:2.5},
+        markLine:{silent:true,symbol:'none',lineStyle:{color:'#30363d',type:'dashed',width:1},
+          data:[{xAxis:mx,label:{formatter:`X=${mx}`,color:'#8b949e',fontSize:10}},{yAxis:my,label:{formatter:`Y=${my}`,color:'#8b949e',fontSize:10}}]}
+      }))
+    });
+    window.addEventListener('resize',()=>ch.resize());
+  })();
+});
+</script>
+</body>
+</html>
