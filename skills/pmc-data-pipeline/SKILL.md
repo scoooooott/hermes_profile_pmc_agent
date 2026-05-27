@@ -434,7 +434,6 @@ Amazon 数据在 ODS 中有两套独立的编码体系。详见 `references/amaz
 - 管线验证报告: `~/workspace/pmc-agents/docs/管线验证报告.md`
 - 数据链路盘点: `~/workspace/pmc-agents/docs/数据接入链路盘点.md`
 - 模板规格书: `~/workspace/pmc-agents/docs/excel-template-spec.md`
-- cosboard 表结构与 SKU 关联参考: `references/cosboard-schema.md`
 - 维护抽检轮换记录: `references/maintenance-rotation.md`
 - 亚马逊 MSKU 导入: `references/amazon-msku-import.md`
 - 亚马逊数据架构: `references/amazon-data-architecture.md`
