@@ -147,7 +147,3 @@ playwright install chromium
 5. **Excel sheet_name 超长**：Excel 限制 31 字符，`render_dataframe_to_excel` 自动截断但传入时尽量短。
 6. **多场景并发写入同一目录**：各场景用独立 `output_name` 前缀（如 `scene01-`, `scene02-`）避免文件冲突。
 7. **`dwd_params` 视图因非 JSON 的 `param_default` 崩溃**：`dwd_params` 是通过 `CAST(ods_params.param_default AS JSON)` 解析生成的视图。若 `ods_params` 中某行的 `param_default` 不是合法 JSON（如 P11 的 `sku_override` 缺少引号），所有查询 `dwd_params` 的场景（场景01~09）报错 `Malformed JSON`。修复：`UPDATE ods_params SET param_default = '"sku_override"' WHERE param_no = 'P11'`。遇到这类错误时优先排查 `ods_params.param_default` 中哪些值不是合法的 JSON 对象/数组。
-
-## 参考文件
-
-- `references/cosboard-fba-shipment-schema.md` — FBA 发货表的仓库字段说明。warehouse_name 全是"虚拟仓库"无意义，fulfillment_center 才是真实收货仓库（57个FC代码）。供任何需要消费 FBA 发货数据的场景引用。
