@@ -3,7 +3,7 @@
 ## 管线全链路
 
 ```
-数据源 → 管线（API/CSV/DB/Excel）→ DuckDB ODS（10张表）
+数据源 → 管线（API/CSV/DB/Excel）→ DuckDB ODS（9张表）
   → refresh_dwd_metrics.py → dwd_sku_daily_metrics（统一消费口）
     → 10 个场景 Skill 消费
 ```
@@ -11,8 +11,7 @@
 ## 六大业务板块
 
 ### ① 商品档案
-- **ods_skus**（14列）：商品主数据，全量覆盖。字段：sku_code(PK), spu_code, product_name, category, tier(S/A/B/C/N), lifecycle(新品/成长/成熟/衰退), production_cycle_days, manual_daily_sale_target, lead_time, moq
-- **ods_cdm_skubom**（3列）：SKU 编码归一化映射，全量覆盖。字段：psku(源系统SKU), sku_id(归一化SKU), rm_qty(组合装拆解比例)
+- **ods_skus**（14列）：商品主数据（仅单品），全量覆盖。字段：sku_code(PK), spu_code, product_name, category, tier(S/A/B/C/N), lifecycle(新品/成长/成熟/衰退), production_cycle_days, manual_daily_sale_target, lead_time, moq
 - **加载模式**：全量覆盖（DROP + INSERT）
 - **场景00** 写入 tier 和 lifecycle，经 DWD 同步到所有下游场景
 
@@ -79,6 +78,5 @@
 | overseas_inv_available | | | | | | ◉ | | | | |
 | overseas_ship_onway | | | | | | ◉ | | | | |
 | ods_po.order_qty | | | ◉ | | ◉ | | | | ◉ | ◉ |
-| ods_cdm_skubom.* | | | | | | ◉ | | | | |
 | ods_ship.* | | | | | | ◉ | | | | |
 | ods_wmap.msu_id | | | | | | ◉ | | | | |

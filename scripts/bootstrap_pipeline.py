@@ -50,11 +50,6 @@ def create_tables(con):
             lead_time VARCHAR,
             updated_at VARCHAR
         )""",
-        """CREATE TABLE IF NOT EXISTS ods_cdm_skubom (
-            psku VARCHAR,
-            sku_id VARCHAR,
-            rm_qty BIGINT
-        )""",
         # ② 每日销量
         """CREATE TABLE IF NOT EXISTS ods_sales (
             sku_code VARCHAR,
@@ -261,7 +256,6 @@ def verify(con):
     """输出就绪检查报告"""
     tables = {
         "ods_skus": ("商品档案", True),
-        "ods_cdm_skubom": ("SKU编码映射", False),
         "ods_sales": ("每日销量", True),
         "ods_inventory_domestic": ("国内库存", True),
         "ods_inventory_overseas": ("海外库存", True),

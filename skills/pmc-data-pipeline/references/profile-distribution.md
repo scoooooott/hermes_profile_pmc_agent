@@ -49,9 +49,9 @@ python3 bootstrap_pipeline.py
 1. 环境检查：API 健康、cosboard 连通、依赖就绪
 2. 创建 `~/pmc-data/{static,snapshot,incremental}/` 目录
 3. 拉取 5 个 API 端点 → Excel 文件（skus ~10MB, inventory ~1.8MB, 其他 <100KB）
-4. 调用 `pmc_import.py` → 创建 10 张 ODS 表
+4. 调用 `pmc_import.py` → 创建 ODS 表（按 DATA_CONTRACT 9 张标准表）
 5. 调用 `refresh_dwd_metrics.py` → 创建 DWD 指标表
-6. 验证：11 张表行数检查 + 唯一性
+6. 验证：10 张表行数检查 + 唯一性
 7. 可选：创建每日 cron job
 
 **总耗时约 3 分钟**（空环境 → 全部场景可用）。

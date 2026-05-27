@@ -57,7 +57,7 @@ cd ~/workspace/pmc-agents && nohup python3 pmc_template_api.py &
 
 | # | 板块 | 核心表 | 内容 | 必选？ |
 |---|------|--------|------|--------|
-| ① | 商品档案 | ods_skus + ods_cdm_skubom | SKU主数据 + 编码归一化映射 | ✅ 必选 |
+| ① | 商品档案 | ods_skus | SKU主数据（仅单品，不含组合装） | ✅ 必选 |
 | ② | 每日销量 | ods_sales | 日销量 × SKU × 店铺 | ✅ 必选 |
 | ③ | 库存快照 | ods_inventory_domestic + ods_inventory_overseas | 国内库存 + 海外FBA库存 | ✅ 必选 |
 | ④ | 采购明细 | ods_po + ods_po_recv | 采购单 + 收货明细 | 建议 |
@@ -65,7 +65,6 @@ cd ~/workspace/pmc-agents && nohup python3 pmc_template_api.py &
 | ⑥ | 供需映射 | ods_wmap | SKU→店铺→仓库关系 | ✅ 必选 |
 | ⑦ | 规则参数 | ods_params | P1-P14 业务参数 | ✅ 必选 |
 
-> 商品档案中 `ods_cdm_skubom` 是编码归一化枢纽表（psku → sku_id, rm_qty 拆解比例），如果客户有多套 SKU 编码体系，必须提供映射。
 
 **Step 2：逐一确认**
 
@@ -126,16 +125,6 @@ duckdb ~/pmc-data/pmc_ods.duckdb -c "SELECT column_name, data_type FROM informat
 | 12 | moq | VARCHAR | | 最小起订量 |
 | 13 | lead_time | VARCHAR | | 采购交期(天) |
 | 14 | updated_at | VARCHAR | | 更新时间 |
-
-**编码归一化表 ods_cdm_skubom**
-
-| # | 字段名 | 类型 | 必填 | 说明 |
-|---|--------|------|------|------|
-| 1 | psku | VARCHAR | ✅ | 平台SKU（如 ERP 系统的 SKU） |
-| 2 | sku_id | VARCHAR | ✅ | 归一化SKU（PMC 内部统一编码） |
-| 3 | rm_qty | BIGINT | ✅ | 拆解比例（组合装 = 1拆N，单品 = 1） |
-
-> **关键**：`psku` 可能是组合/套装编码，`rm_qty` 表示 1 个 psku 拆成多少个 sku_id。比如 `PSKU-A` 包含 3 个单品，则产生 3 行，每行 rm_qty=1（或按比例分配）。
 
 **② 每日销量 ods_sales（4 列）**
 
@@ -255,85 +244,85 @@ duckdb ~/pmc-data/pmc_ods.duckdb -c "SELECT column_name, data_type FROM informat
 
 ---
 
-## 阶段 C — 编码归一化
+## 阶段 C — 数据前置预处理
 
 ### 目标
 
-确认不同数据源的 SKU 编码是否统一。如不统一，帮客户建立 `ods_cdm_skubom` 映射。
+确认客户是否需要对原始数据做前置处理，确保数据进入 PMC 系统前已满足标准要求。
 
-### 为什么要归一化
+### 预处理规则
 
-PMC 系统各数据源可能使用不同的 SKU 编码体系：
+PMC 标准体系只接收**单品级**数据。以下情况必须在数据导入 PMC 前完成预处理：
 
-| 来源 | 编码格式示例 | 备注 |
-|------|-------------|------|
-| 商品主数据 | `DA5002AE-4P1-XL` | 客户 ERP 原生 SKU |
-| 日销量 | `BX451-Black-S` | 已归一化 SKU（产品-颜色-尺码） |
-| BOM 映射表 | `01_BX451AB-1P01-S` | 带前缀的又一编码 |
-| 采购明细 | `DA5002AE-4P1-XL` | 与商品主数据同体系 |
+#### 规则 1：组合装/套装 → 单品拆解
 
-**不同体系间直接 JOIN 会得到空结果。** 必须通过 `ods_cdm_skubom` 做归一化桥接。
+如果客户的销售数据中包含组合装（如「A款+B款 套装」），必须在前置环节将组合装销量拆解为单品销量。
 
-### 编码探测流程
+**拆解方式**：
+1. 客户提供组合装 BOM（物料清单），列出每个组合装 SKU 包含哪些子 SKU 及各子 SKU 的数量
+2. 客户在 ETL 层将组合装销量按 BOM 拆解为单品销量（`组合装销量 × 子SKU数量`）
+3. 拆解后的单品销量再导入 `ods_sales`
 
-**Step 1：建立 SKU 集合**
+**示例**：
 
-对客户提供的每块数据，提取所有不重复 SKU 值：
+| 组合装 SKU | 销量 | 子 SKU | 用量 | 拆解后单品销量 |
+|-----------|------|--------|------|-------------|
+| SET-A | 10件 | SKU001 | 2 | 20件 |
+| SET-A | 10件 | SKU002 | 1 | 10件 |
 
-```sql
--- DuckDB 中执行
-SELECT 'ods_skus' AS source, COUNT(DISTINCT sku_code) AS cnt FROM ods_skus
-UNION ALL
-SELECT 'ods_sales' AS source, COUNT(DISTINCT sku_code) FROM ods_sales
-UNION ALL
-SELECT 'ods_inventory' AS source, COUNT(DISTINCT sku_code) FROM ods_inventory_domestic;
-```
+> **关键约束**：`ods_skus` 商品档案中**只能包含单品 SKU**，不得出现组合装 SKU。如果一个 SKU 对应多个子 SKU，说明它是组合装，不应出现在商品档案中。
 
-**Step 2：交叉匹配**
+#### 规则 2：SKU 编码体系统一
 
-检查两两表之间 SKU 的匹配率：
+所有数据源（商品档案、日销量、库存、采购、发货）必须使用**同一套 SKU 编码**。
 
-```sql
--- 商品主数据 vs 日销量 SKU 匹配率
-SELECT
-    COUNT(*) AS total_skus_in_sales,
-    COUNT(s.sku_code) AS matched,
-    ROUND(COUNT(s.sku_code) * 100.0 / COUNT(*), 1) AS pct
-FROM (SELECT DISTINCT sku_code FROM ods_sales) sale
-LEFT JOIN (SELECT DISTINCT sku_code FROM ods_skus) s ON sale.sku_code = s.sku_code;
-```
+**检查方法**：
+- 提取各数据源的去重 SKU 列表
+- 交叉比对匹配率
+- 如果不同数据源对同一商品使用不同编码，必须在 ETL 层统一编码后再导入
 
-**Step 3：判断结果**
+**常见不统一场景及处理**：
 
-| 匹配率 | 判定 | 处理 |
-|--------|------|------|
-| > 95% | 编码统一 | 无需映射，直接进入阶段 D |
-| 50-95% | 部分匹配 | 需要补全映射 |
-| < 50% | 不同编码体系 | 必须建立完整映射表 |
+| 不统一类型 | 示例 | 处理方式 |
+|-----------|------|---------|
+| ERP 不同模块编码不一致 | 商品模块 `A001`，销售模块 `SKU-A001` | ETL 层做编码映射，统一输出 |
+| 海外仓系统使用不同编码 | 国内 `T恤-白-M`，海外 `TShirt-White-M` | ETL 层做字典映射 |
+| 手工 Excel 使用简称 | 系统 `DA5002AE-4P1-XL`，手工 `DA5002-XL` | 规范手工数据录入，或做模糊匹配辅助人工审核 |
 
-**Step 4：建立映射**
+> **目标**：进入 DuckDB 后，`ods_skus.sku_code` = `ods_sales.sku_code` = `ods_inventory_domestic.sku_code` = `ods_inventory_overseas.sku_code`。直接 JOIN，不需要任何中间映射表。
 
-给客户一个 Excel 模板，三列：
+#### 规则 3：数据格式标准化
 
-| psku | sku_id | rm_qty |
-|------|--------|--------|
-| `ERP-SKU-001` | `PMCSKU-Black-M` | 1 |
-| `SET-COMBO-A` | `PMCSKU-Red-S` | 1 |
-| `SET-COMBO-A` | `PMCSKU-Blue-L` | 1 |
+进入 PMC 前必须完成以下标准化：
 
-> 组合装拆解：`SET-COMBO-A` 是包含 Red-S + Blue-L 的套装，rm_qty 按比例分配。
+| 要求 | 说明 |
+|------|------|
+| 日期格式 | 统一 `YYYY-MM-DD` 或 `YYYY-MM-DD HH:MM:SS` |
+| 数值格式 | 整数，非负。不允许 `"10件"` / `"约50"` 等含中文的数值 |
+| 编码去空格 | SKU 编码首尾去空格，不允许 `" SKU001 "` |
+| 负值处理 | 负库存 → 设为 0，负销量 → 丢弃并记录异常日志 |
 
-客户填完后，以 `ods_cdm_skubom` 表结构导入 DuckDB。
+### 引导对话流程
 
-**Step 5：验证映射完整性**
+**Step 1：询问组合装情况**
 
-```sql
--- 检查哪些 SKU 没有映射
-SELECT DISTINCT d.sku_code
-FROM ods_sales d
-WHERE d.sku_code NOT IN (SELECT psku FROM ods_cdm_skubom)
-  AND d.sku_code NOT IN (SELECT sku_id FROM ods_cdm_skubom);
-```
+「你们的商品是否有组合装/套装/捆绑销售？如果有，请提供组合装 BOM 清单，并在数据导入前将组合装销量拆解为单品销量后再给到我们。」
+
+**Step 2：检查编码一致性**
+
+对客户提供的各数据源样例，逐对交叉比对 SKU 编码匹配率。
+
+如果匹配率 < 95%，要求客户说明编码差异原因，并在 ETL 层统一后再提供数据。
+
+**Step 3：确认预处理完成**
+
+| 检查项 | 判断标准 | 状态 |
+|--------|---------|------|
+| 组合装已拆解 | ods_skus 中无组合装 SKU，ods_sales 中无组合装销量 | ☐ |
+| 编码体系统一 | 各表 SKU 交叉匹配率 > 95% | ☐ |
+| 格式标准化 | 日期/数值/编码格式符合要求 | ☐ |
+
+> 三项全部通过后才进入阶段 D。任何一项不通过，回到对应步骤要求客户修正。
 
 ---
 
@@ -454,8 +443,6 @@ ods_skus  →  ods_wmap  →  ods_inventory_domestic/overseas
   →  ods_sales  →  ods_po/ods_po_recv  →  ods_ship  →  ods_params
 ```
 
-> `ods_cdm_skubom` 如果有编码映射问题，在导入 ods_sales 之前完成。
-
 ### 生成交付清单
 
 阶段 D 完成后，输出给客户的交付清单：
@@ -465,7 +452,7 @@ PMC 数据接入 — 管道配置
 
 1. DuckDB DDL 脚本: /path/to/create_tables.sql  
 2. 导入脚本: /path/to/import_customer_data.py  
-3. 编码映射表: /path/to/cdm_skubom.xlsx（如需）  
+3. ETL 编码映射配置（如需）: /path/to/etl_mapping.yaml  
 4. 参数配置模板: /path/to/params_template.xlsx  
 5. 每日导入 cron: 建议每天凌晨 3:00 执行 import_customer_data.py
 
@@ -519,20 +506,6 @@ SELECT
     COUNT(*) FILTER (WHERE inventory_days < 0) AS data_error
 FROM dwd_sku_daily_metrics;
 
--- 验证 4：SKU 映射完整性
-SELECT
-    'unmapped_sales' AS issue,
-    COUNT(DISTINCT s.sku_code) AS cnt
-FROM ods_sales s
-LEFT JOIN ods_cdm_skubom b ON s.sku_code = b.psku OR s.sku_code = b.sku_id
-WHERE b.psku IS NULL
-UNION ALL
-SELECT
-    'unmapped_inventory' AS issue,
-    COUNT(DISTINCT i.sku_code) AS cnt
-FROM ods_inventory_domestic i
-LEFT JOIN ods_cdm_skubom b ON i.sku_code = b.psku OR i.sku_code = b.sku_id
-WHERE b.psku IS NULL;
 ```
 
 **Step 3：抽样场景验证**
@@ -584,9 +557,9 @@ DWD 指标
 ```
 1. 数据库连接信息 → 配置到 pmc_template_api.py
 2. 跑标准 5 端点 → 下载 Excel
-3. pmc_import.py 导入 → DuckDB ODS 10 张表
+3. pmc_import.py 导入 → DuckDB ODS 表
 4. refresh_dwd_metrics.py → DWD 指标层
-5. 按需导入编码映射表（从客户数据库已有视图）
+5. 按需导入客户自定义参数
 ```
 
 不需要的阶段直接跳过，向客户确认即可。
@@ -610,7 +583,7 @@ DWD 指标
 | 阻塞 | 处理 |
 |------|------|
 | 客户提供不了某块数据 | 确认该板块是否必选。非必选跳过，必选则协商替代方案 |
-| SKU 编码无法映射 | 先让客户给映射表，实在没有就做模糊匹配（编辑距离）辅助人工审核 |
+| SKU 编码无法统一 | 让客户在 ETL 层做编码映射。实在无法统一的，要求客户逐一说明原因 |
 | 字段完全对不上 | 回到阶段 B 重新确认，可能是客户给了错误的数据 |
 | 管线报错 | 逐层排查：API 可用？→ Excel 格式正确？→ DuckDB DDL 匹配？ |
 

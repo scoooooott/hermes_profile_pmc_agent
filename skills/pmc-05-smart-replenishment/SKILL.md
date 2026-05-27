@@ -31,11 +31,10 @@ metadata:
 | | sellable_inv | 国内可售库存（参考对比用） |
 | `dwd_params` | param_no='P9', tier, param_value | 补货触发阈值（海外库存天数低于此触发） |
 | | param_no='P10', tier, param_value | 目标海外库存天数（补货目标） |
-| `ods_cdm_skubom` | psku, sku_id, rm_qty | SKU编码映射表（302k行）— 海外库存sku_code(=psku) ↔ 归一化sku_id |
-| `ods_inventory_overseas` | sku_code(=psku), inv_available, inv_onway | FBA库存原始数据，用于通过映射补充DWD中缺失的海外库存 |
-| `ods_ship` | sku_code(=psku), dest_warehouse, ship_qty | FBA发货明细，用于FC拆解 |
+| `ods_inventory_overseas` | sku_code, inv_available, inv_onway | FBA库存原始数据（仅当DWD中海外库存不足时补充） |
+| `ods_ship` | sku_code, dest_warehouse, ship_qty | FBA发货明细，用于FC拆解 |
 
-> **海外库存数据**：`dwd_sku_daily_metrics` 的 `overseas_inv_available` + `overseas_ship_onway` 为 DWD 层预聚合的海外库存。但由于SKU编码体系差异，DWD中仅1个SKU同时有销量和海外库存。**必须通过 `ods_cdm_skubom` 表做编码映射**才能将海外库存匹配到有销量的归一化SKU。映射方式：`ods_inventory_overseas.sku_code = ods_cdm_skubom.psku → sku_id = dwd_sku_daily_metrics.sku_code`。匹配率99.6%。1:N映射（一个psku对应多个颜色变体）按 `rm_qty` 比例拆分库存。详见 `references/sku-mapping-via-cdm-skubom.md`。
+> **SKU 编码前提**：所有数据源的 SKU 编码必须在 ETL 层完成统一后再导入。`ods_inventory_overseas.sku_code` 必须与 `dwd_sku_daily_metrics.sku_code` 一致，直接 JOIN 即可，不需要中间映射表。如海外库存 SKU 编码与销量 SKU 不同，说明前置 ETL 未完成编码统一，需回退处理。
 
 > **MSU 映射**：当前 DWD 口径无 MSU 维度。SKU→MSU 归因暂保留 ODS 直读（`ods_sales.msu_id`），**待接入 DWD 统一口径**后替换。详见下方「MSU 粒度补充信息」。
 
@@ -234,8 +233,8 @@ SELECT * FROM sku_primary_msu
 1. `duckdb.connect('${PMC_DB_PATH:-~/pmc-data/pmc_ods.duckdb}')` 连接
 2. 从 `dwd_params` 读取 P9（触发阈值）+ P10（目标天数），按 tier 匹配
 3. 从 `dwd_sku_daily_metrics` 读取各 SKU 的加权日均销 + 原始海外库存
-4. **SKU编码映射（关键步骤）**：通过 `ods_cdm_skubom` 将 `ods_inventory_overseas` 的海外库存关联到归一化 `sku_id`。做法：`ods_inventory_overseas.sku_code(=psku) → ods_cdm_skubom.psku → sku_id → JOIN dwd_sku_daily_metrics.sku_code`。1:N映射按 `rm_qty` 比例拆分库存。
-5. 合并映射后的海外库存与DWD层原有海外字段：`COALESCE(映射后ov_available, 原overseas_inv_available)`，得到每个sku_id的真实海外库存
+4. 读取并合并海外库存数据：从 `ods_inventory_overseas`（如需补充DWD）读取可售/在途库存，按 sku_code 直接 JOIN `dwd_sku_daily_metrics`（前提：SKU 编码已在 ETL 层统一）
+5. 合并海外库存：`COALESCE(ov_available, overseas_inv_available)`，得到每个 SKU 的真实海外库存
 6. 计算海外库存天数（`ov_total = ov_available + ov_ship_onway`），对比触发阈值
 7. 对触发SKU计算建议补货量
 8. 从 `ods_ship` 按 fulfillment_center 计算历史发货占比，分配补货量到各 FC
@@ -278,7 +277,9 @@ SELECT * FROM sku_primary_msu
 
 ## 常见问题
 
-### 1. SKU编码映射（已打通 ✅）\n\n海外库存表的 SKU 编码（cosboard 原生，如 `DA5002AE-4P1-XL`）和销量表的 SKU 编码（归一化内部，如 `BX451-Black-S`）属于不同体系。之前 `dwd_sku_daily_metrics` 中只有 **1 个 SKU** 同时有海外库存和销量数据。\n\n**解决方案**：通过 cosboard 视图 `v_cdm_skubom`（psku→sku_id, rm_qty, 302k行）做编码映射，已持久化为 DuckDB 表 `ods_cdm_skubom`。\n\n**映射链路**：\n```\nods_inventory_overseas.sku_code (=psku)\n  → JOIN ods_cdm_skubom.psku\n  → ods_cdm_skubom.sku_id (=归一化编码)\n  → JOIN dwd_sku_daily_metrics.sku_code\n```\n\n**匹配率**：\n- 海外库存13,632个psku → 13,583匹配（99.6%）→ 11,919个sku_id\n- 其中有销量：2,717个（之前仅1个）\n- 有销量+海外可用库存：7,174个\n\n**1:N映射处理**：一个psku可能映射到多个sku_id（如不同颜色变体 `DA0024AD-7P1-L → PX120-BlackBrown-L` 和 `PX120-IndigoBlue-L`），按 `rm_qty` 比例拆分库存。\n\n**⚠️ 注意**：`ods_inventory_overseas` 的 `inv_available` 和 `inv_onway` 是 VARCHAR 列，CAST 前需 `NULLIF('')`。
+### 1. SKU编码必须统一
+所有数据源的 SKU 编码必须在 ETL 层统一后再导入。`ods_inventory_overseas.sku_code` 必须等于 `dwd_sku_daily_metrics.sku_code`，直接 JOIN 即可。
+如两者不一致，说明前置 ETL 未完成编码统一，需回退到数据接入阶段重新处理，不允许在 DuckDB 内做映射桥接。
 > cosboard 是客户的原始数据源，不是分析的直接消费层。所有 cosboard 数据必须经过 `pmc_template_api.py` → 标准 Excel → `pmc_import.py` → DuckDB 的管线。不要在 skill 里写 cosboard 直连 SQL，即使数据看起来已经存在。该管线的设计目的是保证数据格式一致、可审计、可追溯。
 
 ### 2. sellable_inv 有负值

@@ -8,11 +8,9 @@
 | 来源 | 编码格式 | 示例 |
 |:---|:---|:---|
 | ods_skus / ods_inventory_domestic / ods_po / ods_ship / ods_inventory_overseas | 原生格式 | `DA5002AE-4P1-XL` |
-| ods_sales | 归一化格式（经 cdm_skubom） | `BX451-Black-S` |
-| ods_cdm_skubom.psku | 桥接（原生→归一化） | `DA5002AE-4P1-XL` |
-| ods_cdm_skubom.sku_id | 桥接目标 | `BX451-Black-S` |
+| ods_sales | 归一化格式 | `BX451-Black-S` |
 
-**关键**：DWD 表的 sku_code 来自 ods_skus（原生格式），所以 DWD JOIN ods_skus 可以匹配。但 ods_sales JOIN ods_skus 会全 NULL，因为编码体系不同。
+**关键**：所有数据源必须在 ETL 层统一为同一套 SKU 编码后再导入 DuckDB。不允许在 DuckDB 内做编码映射桥接。如果 `ods_sales` 的 SKU 编码与 `ods_skus` 不同，说明前置 ETL 未完成编码统一，需回退到阶段 C 重新处理。
 
 ## 2. dwd_params 展开逻辑
 

@@ -121,14 +121,16 @@ cosboard 内部存在**多套 SKU 编码体系**，导入 DuckDB 后直接 `JOIN
 |------|------|-------------|------|
 | 商品主数据 (`cdm_sku`) | `sku` | `DA5002AE-4P1-XL` | cosboard 原生 SKU |
 | FBA 库存 (`dwd_sh_amz_fba_stock`) | `goods_sku` | `TTW-008-Skin-85D` | 同上体系 |
-| FBA 发货 (`dwd_sh_amz_fba_shipment_sku_info`) | `commodity_sku` | `CR0908NC-7P09-M` | 同上体系（99.6% 与 `goods_sku` 重合）|
-| BOM 表 (`v_cdm_skubom`) | `sku_id` | `BX451-Black-S` | **不同编码体系**（产品-颜色-尺码） |
-| BOM 表 (`v_cdm_skubom`) | `psku` | `01_BX451AB-1P01-S` | **又一套编码**（有 "01_" 前缀） |
-| BOM 表 (`v_cdm_skubom`) | `sku_code` | 全部 NULL | **不可用** |
+| FBA 发货 (`dwd_sh_amz_fba_shipment_sku_info`) | `commodity_sku` | `CR0908NC-7P09-M` | 同上体系 |
+| 日销量表 (`v_dwd_com_sell_1d`) | `sku_id` | `BX451-Black-S` | **归一化编码**（产品-颜色-尺码） |
+| 采购视图 (`v_purchase`) | `sku_code` | `DA5002AE-4P1-XL` | 与商品主数据同体系 |
 
 **影响**：当你在 DuckDB 中 JOIN `ods_inventory_overseas.sku_code`（cosboard 原生 "DA5002AE-4P1-XL"）和 `ods_skus.sku_code`（同样来自 `cdm_sku.sku`）时，**两者格式一致，可以匹配**。但 JOIN `ods_sales.sku_code`（来自 `v_dwd_com_sell_1d.sku_id` 归一化格式 "BX451-Black-S"）时，**格式不同，JOIN 全 NULL**。
 
-**处理方法**：\n- DWD 层用 `ods_skus` 做 SKU 锚点表（cosboard 原生 SKU 格式）\n- 海外库存/发货/商品主数据在同体系内 JOIN（格式一致）\n- **已实现**：通过 `v_cdm_skubom`（已导入 DuckDB 为 `ods_cdm_skubom`，302k行）做编码映射，将 cosboard 原生 SKU（`ods_inventory_overseas.sku_code`，匹配率99.6%）转化为归一化 `sku_id`。1:N映射按 `rm_qty` 比例拆分库存。详见 `pmc-05-smart-replenishment` 的 `references/sku-mapping-via-cdm-skubom.md`。\n- 如果 `ods_sales` 的 SKU 格式和 `ods_skus` 不一致，说明 `ods_sales` 已内置归一化而 `ods_skus` 还是原生的——这是已知差异，不影响各场景独立计算，但影响跨表 JOIN
+**处理方法**：
+- 所有数据源必须在 ETL 层统一为同一套 SKU 编码后再导入 DuckDB
+- 不允许在 DuckDB 内做编码映射桥接（如 `ods_cdm_skubom`）
+- 如果 `ods_sales` 的 SKU 格式和 `ods_skus` 不一致，说明 `ods_sales` 已内置归一化而 `ods_skus` 还是原生的——这是已知差异，应在 ETL 层统一，而非在各场景 SQL 中做映射补偿
 
 ## DuckDB 注意
 
