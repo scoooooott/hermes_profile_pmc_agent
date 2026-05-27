@@ -95,8 +95,6 @@ DuckDB (${PMC_DB_PATH:-~/pmc-data/pmc_ods.duckdb})
 - 5/23 的数据只有在 5/24 跑管线时才能拉到
 - 错过了某一天 → 那天的数据就断了
 
-**历史案例**（2026-05-27 发生）：上次手动导入在 5/22，之后连续 6 天没跑管线。cosboard 在 5/22~5/25 有 13,712 条亚马逊数据，但管线只拉到 5/21。恢复手段是临时改 API SQL 的 `=` 为 `>= curdate() - 5` 全量拉，导入完成后改回 `=`。详见 `references/backfill-procedure.md`。
-
 ## SKU 归一化枢纽
 
 `v_cdm_skubom` 是 cosboard 跨表关联的核心视图：
@@ -439,7 +437,6 @@ Amazon 数据在 ODS 中有两套独立的编码体系。详见 `references/amaz
 - 亚马逊数据架构: `references/amazon-data-architecture.md`
 - DuckDB 远程访问: `references/duckdb-remote-access.md`
 - DuckDB Web UI 脚本: `scripts/duckdb_webui.py`
-- 增量回填操作手册: `references/backfill-procedure.md`
 - Profile 分发与环境自举: `references/profile-distribution.md`
 - 六大业务板块数据架构: `references/six-business-domains.md`
 - 任务拆解方法论: `references/task-decomposition.md`
