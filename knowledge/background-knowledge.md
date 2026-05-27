@@ -3,14 +3,14 @@
 > 本文件补充 SOUL.md 和 DATA_CONTRACT.md 中未覆盖的细节知识。
 > 主要面向接入方和维护者，而非场景执行引擎。
 
-## 1. 两套 SKU 编码体系
+## 1. 商品SKU 与 产品SKU（双层编码体系）
 
-| 来源 | 编码格式 | 示例 |
-|:---|:---|:---|
-| ods_skus / ods_inventory_domestic / ods_po / ods_ship / ods_inventory_overseas | 原生格式 | `DA5002AE-4P1-XL` |
-| ods_sales | 归一化格式 | `BX451-Black-S` |
+| 编码体系 | 含义 | 出现位置 | 示例 |
+|:---|:---|:---|:---|
+| **商品SKU** | 平台销售侧标识 | ods_sales（销售数据） | `BX451-Black-S` |
+| **产品SKU** | 仓储/库存侧标识 | ods_skus、ods_inventory、ods_po、ods_ship | `DA5002AE-4P1-XL` |
 
-**关键**：所有数据源必须在 ETL 层统一为同一套 SKU 编码后再导入 DuckDB。不允许在 DuckDB 内做编码映射桥接。如果 `ods_sales` 的 SKU 编码与 `ods_skus` 不同，说明前置 ETL 未完成编码统一，需回退到阶段 C 重新处理。
+**关键**：PMC 系统的数据锚点是产品SKU。销售数据的商品SKU 必须在 ETL 层转换为产品SKU 后再导入 DuckDB。不允许在 DuckDB 内做编码映射桥接。
 
 ## 2. dwd_params 展开逻辑
 

@@ -171,8 +171,8 @@ weighted_daily = 0.5 × yesterday_qty + 0.3 × avg_7d_qty + 0.2 × avg_30d_qty
 
 ## 5. 陷阱笔记
 
-### 陷阱 1：各数据源 SKU 编码必须统一
-如果不同数据源对同一商品使用不同编码（如 `ods_sales` 用归一化 `BX451-Black-S`，而 `ods_skus` 用原生 `DA5002AE-4P1-XL`），跨表直接 JOIN 会全 NULL。必须在 ETL 层统一编码后再导入，不允许依赖 DuckDB 内的映射表做桥接。
+### 陷阱 1：商品SKU 与 产品SKU 是两套编码，必须关联
+销售数据用的是**商品SKU**（平台销售侧编码，如 `BX451-Black-S`），库存/采购/发货用的是**产品SKU**（仓储管理侧编码，如 `DA5002AE-4P1-XL`）。两套体系天然不同，直接 JOIN 会全 NULL。必须在 ETL 层将销售数据的商品SKU 转换为产品SKU 后再导入，PMC 系统的数据锚点是产品SKU。不允许在 DuckDB 内做映射桥接。
 
 ### 陷阱 2：manual_daily_sale_target 是 VARCHAR
 需 `CAST(NULLIF(manual_daily_sale_target, '') AS DOUBLE)` 处理。`ods_skus` 没有 `sales_target` 列（曾导致 Binder Error）。
