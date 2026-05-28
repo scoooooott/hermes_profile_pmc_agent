@@ -1,7 +1,7 @@
 ---
 name: pmc-data-onboarding
 version: 2.0.0
-description: "PMC 新客户数据接入向导：分 6 阶段逐步引导客户完成客户画像 → 板块发现 → 数据探查 → 预处理 → 管道配置 → 端到端验证。阶段 0 客户画像采用动态参数提问（查询 dwd_params 而非硬编码），自适应配置而非筛选客户。"
+description: "PMC 新客户数据接入向导：分 6 阶段逐步引导客户完成客户画像 → 板块发现 → 数据探查 → 预处理 → 管道配置 → 端到端验证。阶段 0 客户画像采用动态参数提问（查询 ods_params 而非硬编码），自适应配置而非筛选客户。"
 metadata:
   triggers:
     - "新客户接入"
@@ -21,14 +21,14 @@ metadata:
 
 ## 接入前检查：环境初始化
 
-运行 bootstrap 完成 DuckDB 初始化。如 bootstrap 失败，按 [`references/environment-setup.md`](references/environment-setup.md) 排查。
+运行 bootstrap 完成 DuckDB 初始化（默认创建 10 张 ODS 表）。如 bootstrap 失败，按 [`references/environment-setup.md`](references/environment-setup.md) 排查。
 
 ```bash
 python3 -c "import duckdb, pandas, openpyxl; print('OK')"
 cd ~/workspace/pmc-agent && python3 scripts/bootstrap_pipeline.py
 ```
 
-验证 9 张 ODS 表就绪后，进入阶段 0。
+验证 10 张 ODS 表就绪后，进入阶段 0。
 
 ---
 
@@ -76,7 +76,7 @@ cd ~/workspace/pmc-agent && python3 scripts/bootstrap_pipeline.py
 
 ```sql
 SELECT param_no, param_id, param_name, param_default, param_type, param_note
-FROM dwd_params ORDER BY param_no, tier, sub_param;
+FROM ods_params ORDER BY param_no;
 ```
 
 逐参数判断是否需要提问：
@@ -212,6 +212,12 @@ WHERE table_name='ods_skus' ORDER BY ordinal_position;"
 | ⚠️ | 客户缺失，需补充或取默认值 |
 | 🚫 | 阻断：核心字段缺失，无法接入 |
 
+### Gate 判定
+
+- 全部字段 ✅ 或 ⚡ → 进入阶段 C
+- 存在 🚫 阻断项 → 停止，要求客户补充缺失数据后重新探查
+- 阻断项过多（> 3 个表有 🚫）→ 回到阶段 A 重新确认数据来源
+
 ---
 
 ## 阶段 C — 数据前置预处理
@@ -262,7 +268,7 @@ WHERE table_name='ods_skus' ORDER BY ordinal_position;"
 
 **Step 1**：询问组合装情况，有则要求提供 BOM
 **Step 2**：确认商品SKU → 产品SKU 映射（逐对交叉比对编码匹配率，< 95% 则排查双层编码）
-**Step 3**：确认预处理完成（三项检查全部通过后才进阶段 D）
+**Step 3**：确认预处理完成（规则1组合装拆解、规则2 SKU映射、规则3格式标准化全部通过后才进阶段 D）
 
 ---
 
@@ -295,7 +301,8 @@ WHERE param_no = 'P1';
 ### 导入顺序
 
 ```
-ods_skus → ods_wmap → ods_inventory → ods_sales → ods_po → ods_ship → ods_params
+ods_skus → ods_wmap → ods_inventory_domestic/overseas
+  → ods_sales → ods_po/ods_po_recv → ods_ship → ods_params
 ```
 
 ### 输出：交付清单
@@ -327,6 +334,11 @@ cd ~/workspace/pmc-agent && python3 scripts/refresh_dwd_metrics.py
 
 检查输出：最新日期是否接近当天，SKU 数是否合理。
 
+**失败处理**：
+- `data_error > 0` → 检查 DWD 刷新日志，排查数据导入错误
+- `with_sales = 0` → 回退到阶段 D 检查导入脚本
+- `warning_slow_moving` 过高 → 标记预警但不阻断，反馈给客户
+
 **Step 2：运行验证 SQL**
 
 详见 [`references/verification-queries.md`](references/verification-queries.md)，包含 SKU 覆盖率、日期连续性、DWD 数据合理性、抽样验证共 4 段 SQL。
@@ -354,7 +366,7 @@ DWD 指标
 
 ## 快速接入模式
 
-已有数据库访问权限的客户可走快速通道：
+已有数据库访问权限且字段匹配完成的客户，可跳过阶段 0/A/B/C 的对话部分，从阶段 D 走快速通道：
 
 ```
 1. 数据库连接信息 → 配置到 pmc_template_api.py
@@ -368,7 +380,7 @@ DWD 指标
 
 ## 相关文件
 
-- 数据契约: `DATA_CONTRACT.md`
+- 数据契约: `~/workspace/pmc-agent/DATA_CONTRACT.md`
 - 管线 Skill: `pmc-data-pipeline`
 - API 源码: `~/workspace/pmc-agent/scripts/pmc_template_api.py`
 - 导入脚本: `~/workspace/pmc-agent/scripts/pmc_import.py`
@@ -381,5 +393,5 @@ DWD 指标
 常见陷阱和纠正方法详见 [`references/trap-notes.md`](references/trap-notes.md)。核心三条：
 
 1. **不要拒绝客户**——PMC 自适应配置，不筛选淘汰
-2. **不要硬编码参数提问**——先查 `dwd_params` 再动态提问
+2. **不要硬编码参数提问**——先查 `ods_params` 再动态提问
 3. **删除敏感文件要用 filter-branch**——`git rm` 的 delete diff 仍泄露内容

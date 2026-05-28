@@ -41,7 +41,7 @@ cd ~/workspace/pmc-agent && python3 scripts/bootstrap_pipeline.py
 ```
 ✓ 数据目录: ~/pmc-data
 ✓ DuckDB 已创建: ~/pmc-data/pmc_ods.duckdb
-✓ ODS 表: 9/9 创建
+✓ ODS 表: 10/10 创建
 ✓ DWD 视图: 2/2 创建
 ✓ 默认参数: P1-P14 已写入
 ```
@@ -59,7 +59,7 @@ ORDER BY table_name;"
 |----------|------|------|
 | 文件不存在 或 无法连接 | DuckDB 未创建 | 重跑 Step 2 |
 | 表数量 = 0 | 空库 | 重跑 Step 2 |
-| 表数量 >= 9 | 已就绪 | ✅ |
+| 表数量 >= 10 | 已就绪 | ✅ |
 | 表数量 1~8 | 部分就绪 | DROP 所有表后重跑 Step 2 |
 
 ## Step 4：检查 API（仅管道模式）
